@@ -18,9 +18,9 @@ except ImportError:
     renamer.rename_a_file = rearranger.rearrange_icons = deleter.delete_a_file = renamer.do_nothing
 
 # --- Configuration ---
-HUNGER_TIMER_SECONDS = 30
-RANDOM_RENAME_MIN_WAIT = 60
-RANDOM_RENAME_MAX_WAIT = 180
+HUNGER_TIMER_SECONDS = 10
+RANDOM_RENAME_MIN_WAIT = 15
+RANDOM_RENAME_MAX_WAIT = 50
 CLOSE_BUTTON_MAX_WAIT = 10
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 64, 80
