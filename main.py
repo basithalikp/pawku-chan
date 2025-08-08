@@ -21,13 +21,13 @@ except ImportError:
 HUNGER_TIMER_SECONDS = 30
 RANDOM_RENAME_MIN_WAIT = 60
 RANDOM_RENAME_MAX_WAIT = 180
+CLOSE_BUTTON_MAX_WAIT = 10
 
-# Adjust window size to make space for the hunger meter
-WINDOW_WIDTH, WINDOW_HEIGHT = 64, 80 # Increased height
-METER_HEIGHT = 10 # Height of the hunger bar
+WINDOW_WIDTH, WINDOW_HEIGHT = 64, 80
+METER_HEIGHT = 10
 
 class AnimatedGIF:
-    """A helper class to handle loading and playing animated GIFs in Tkinter."""
+    """Helper class for animated GIFs."""
     def __init__(self, root, path):
         self.root = root
         self.path = path
@@ -43,10 +43,9 @@ class AnimatedGIF:
                 self.delay = img.info.get('duration', 100)
                 for i in range(img.n_frames):
                     img.seek(i)
-                    frame = ImageTk.PhotoImage(img.copy().resize((WINDOW_WIDTH, WINDOW_WIDTH))) # Ensure GIF is square
+                    frame = ImageTk.PhotoImage(img.copy().resize((WINDOW_WIDTH, WINDOW_WIDTH)))
                     self.frames.append(frame)
         except Exception as e:
-            print(f"Error loading GIF {self.path}: {e}")
             fallback_img = Image.new('RGBA', (WINDOW_WIDTH, WINDOW_WIDTH), 'hotpink')
             self.frames.append(ImageTk.PhotoImage(fallback_img))
 
@@ -57,7 +56,7 @@ class AnimatedGIF:
         self._animate(0)
 
     def _animate(self, frame_num):
-        if not self.label: return
+        if not self.label or not self.label.winfo_exists(): return
         frame = self.frames[frame_num]
         self.label.config(image=frame)
         next_frame_num = (frame_num + 1) % len(self.frames)
@@ -68,12 +67,12 @@ class PawkuChanApp:
         self.root = root
         self.root.title("Pawku-chan")
         self.root.overrideredirect(True)
-        # As requested, using -topmost instead of -transparentcolor for better compatibility.
-        self.root.wm_attributes("-topmost", True) 
+        self.root.wm_attributes("-topmost", True)
 
         self.hunger_level = 0
         self.state_lock = threading.Lock()
         self.current_animation = None
+        self.close_button_window = None
 
         # --- GUI Setup ---
         screen_width = self.root.winfo_screenwidth()
@@ -85,11 +84,9 @@ class PawkuChanApp:
         self.image_label.pack()
         self.image_label.bind("<Button-1>", self.feed_pet)
 
-        # --- Hunger Meter Canvas ---
         self.hunger_canvas = tk.Canvas(root, width=WINDOW_WIDTH, height=METER_HEIGHT, bg='gray20', highlightthickness=0)
         self.hunger_canvas.pack()
         
-        # --- Load Animations ---
         self.animations = {
             "idle": AnimatedGIF(root, os.path.join('assets', 'idle.gif')),
             "hungry": AnimatedGIF(root, os.path.join('assets', 'hungry.gif')),
@@ -97,25 +94,15 @@ class PawkuChanApp:
         }
 
         self.set_animation("idle")
-        self.update_hunger_meter() # Draw the initial full hunger bar
+        self.update_hunger_meter()
         self.start_background_threads()
 
     def update_hunger_meter(self):
-        """Redraws the hunger bar based on the current hunger level."""
-        self.hunger_canvas.delete("all") # Clear the canvas
-        
-        # Define colors and widths for each hunger level
-        hunger_states = {
-            0: {"color": "green", "width_percent": 1.0},    # Content
-            1: {"color": "yellow", "width_percent": 0.66},   # Hungry
-            2: {"color": "orange", "width_percent": 0.33},   # Mad
-            3: {"color": "red", "width_percent": 0.1}       # Furious
-        }
-        
-        state = hunger_states.get(self.hunger_level, hunger_states[3]) # Default to furious state
-        bar_width = WINDOW_WIDTH * state["width_percent"]
-        
-        self.hunger_canvas.create_rectangle(0, 0, bar_width, METER_HEIGHT, fill=state["color"], outline="")
+        self.hunger_canvas.delete("all")
+        states = {0: ("green", 1.0), 1: ("yellow", 0.66), 2: ("orange", 0.33), 3: ("red", 0.1)}
+        color, width_percent = states.get(self.hunger_level, states[3])
+        bar_width = WINDOW_WIDTH * width_percent
+        self.hunger_canvas.create_rectangle(0, 0, bar_width, METER_HEIGHT, fill=color, outline="")
 
     def set_animation(self, state):
         if state != self.current_animation and state in self.animations:
@@ -125,28 +112,30 @@ class PawkuChanApp:
     def feed_pet(self, event):
         with self.state_lock:
             if self.hunger_level > 0:
-                print("You fed Pawku-chan!")
                 self.hunger_level = 0
-                self.update_hunger_meter() # Update the meter visually
+                self.update_hunger_meter()
                 self.set_animation("purring")
                 self.root.after(3000, lambda: self.set_animation("idle"))
 
     def start_background_threads(self):
         threading.Thread(target=self.hunger_management_loop, daemon=True).start()
         threading.Thread(target=self.random_renaming_loop, daemon=True).start()
+        threading.Thread(target=self.random_close_button_loop, daemon=True).start()
 
     def hunger_management_loop(self):
+        """Manages hunger and its consequences safely."""
         while True:
             time.sleep(HUNGER_TIMER_SECONDS)
             with self.state_lock:
                 if self.hunger_level < 3:
                     self.hunger_level += 1
                 
-                self.update_hunger_meter() # Update meter every time level changes
+                # --- THREAD-SAFE GUI UPDATES ---
+                # Ask the main thread to update the GUI instead of doing it directly.
+                self.root.after(0, self.update_hunger_meter)
                 
                 if self.hunger_level == 1:
-                    print("Pawku-chan is hungry!")
-                    self.set_animation("hungry")
+                    self.root.after(0, lambda: self.set_animation("hungry"))
                 elif self.hunger_level == 2:
                     print("Pawku-chan is mad and rearranges your icons!")
                     rearranger.rearrange_icons()
@@ -155,11 +144,53 @@ class PawkuChanApp:
                     deleter.delete_a_file()
 
     def random_renaming_loop(self):
+        """Manages random file renaming."""
         while True:
-            wait_time = random.uniform(RANDOM_RENAME_MIN_WAIT, RANDOM_RENAME_MAX_WAIT)
-            time.sleep(wait_time)
+            time.sleep(random.uniform(RANDOM_RENAME_MIN_WAIT, RANDOM_RENAME_MAX_WAIT))
             print("Pawku-chan feels 'artistic' and renames a file.")
             renamer.rename_a_file()
+
+    def random_close_button_loop(self):
+        """Periodically asks the main thread to create the close button."""
+        while True:
+            time.sleep(random.uniform(1, CLOSE_BUTTON_MAX_WAIT))
+            self.root.after(0, self.create_close_button)
+
+    def create_close_button(self):
+        """Creates the close button. Runs only in the main thread."""
+        if self.close_button_window and self.close_button_window.winfo_exists():
+            return
+
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+
+        self.close_button_window = tk.Toplevel(self.root)
+        self.close_button_window.overrideredirect(True)
+        self.close_button_window.wm_attributes("-topmost", True)
+        
+        x_pos = random.randint(0, screen_width - 30)
+        y_pos = random.randint(0, screen_height - 30)
+        self.close_button_window.geometry(f"30x30+{x_pos}+{y_pos}")
+
+        close_button = tk.Button(
+            self.close_button_window, text="X", bg="red", fg="white",
+            font=("Arial", 12, "bold"), command=self.quit_program, bd=0,
+            activebackground="darkred"
+        )
+        close_button.pack(expand=True, fill="both")
+
+        self.close_button_window.after(2000, self.destroy_close_button)
+
+    def destroy_close_button(self):
+        """Safely destroys the close button window."""
+        if self.close_button_window and self.close_button_window.winfo_exists():
+            self.close_button_window.destroy()
+        self.close_button_window = None
+
+    def quit_program(self):
+        """Destroys the main window, exiting the program."""
+        print("Close button clicked! Pawku-chan vanishes.")
+        self.root.destroy()
 
 if __name__ == "__main__":
     app_root = tk.Tk()
