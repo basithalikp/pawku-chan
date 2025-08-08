@@ -109,3 +109,5 @@ if __name__ == "__main__":
     app = PawkuChanApp(app_root)
     # This starts the Tkinter event loop, which draws the GUI and keeps it running.
     app_root.mainloop()
+
+#prototype testing successful!
