@@ -21,7 +21,10 @@ except ImportError:
 HUNGER_TIMER_SECONDS = 30
 RANDOM_RENAME_MIN_WAIT = 60
 RANDOM_RENAME_MAX_WAIT = 180
-WINDOW_WIDTH, WINDOW_HEIGHT = 64, 64
+
+# Adjust window size to make space for the hunger meter
+WINDOW_WIDTH, WINDOW_HEIGHT = 64, 80 # Increased height
+METER_HEIGHT = 10 # Height of the hunger bar
 
 class AnimatedGIF:
     """A helper class to handle loading and playing animated GIFs in Tkinter."""
@@ -29,41 +32,35 @@ class AnimatedGIF:
         self.root = root
         self.path = path
         self.frames = []
-        self.delay = 100  # Default delay
+        self.delay = 100
         self.label = None
         self.animation_job = None
         self._load()
 
     def _load(self):
-        """Loads GIF frames using Pillow."""
         try:
             with Image.open(self.path) as img:
                 self.delay = img.info.get('duration', 100)
                 for i in range(img.n_frames):
                     img.seek(i)
-                    # Create a PhotoImage for each frame
-                    frame = ImageTk.PhotoImage(img.copy())
+                    frame = ImageTk.PhotoImage(img.copy().resize((WINDOW_WIDTH, WINDOW_WIDTH))) # Ensure GIF is square
                     self.frames.append(frame)
         except Exception as e:
             print(f"Error loading GIF {self.path}: {e}")
-            # Create a fallback frame
-            fallback_img = Image.new('RGBA', (WINDOW_WIDTH, WINDOW_HEIGHT), 'hotpink')
+            fallback_img = Image.new('RGBA', (WINDOW_WIDTH, WINDOW_WIDTH), 'hotpink')
             self.frames.append(ImageTk.PhotoImage(fallback_img))
 
     def play(self, label):
-        """Starts playing the animation on the given label."""
         self.label = label
         if self.animation_job:
             self.root.after_cancel(self.animation_job)
         self._animate(0)
 
     def _animate(self, frame_num):
-        """Cycles through frames to create the animation."""
         if not self.label: return
         frame = self.frames[frame_num]
         self.label.config(image=frame)
         next_frame_num = (frame_num + 1) % len(self.frames)
-        # Schedule the next frame update
         self.animation_job = self.root.after(self.delay, self._animate, next_frame_num)
 
 class PawkuChanApp:
@@ -71,7 +68,8 @@ class PawkuChanApp:
         self.root = root
         self.root.title("Pawku-chan")
         self.root.overrideredirect(True)
-        self.root.wm_attributes("-topmost", 1)
+        # As requested, using -topmost instead of -transparentcolor for better compatibility.
+        self.root.wm_attributes("-topmost", True) 
 
         self.hunger_level = 0
         self.state_lock = threading.Lock()
@@ -85,9 +83,12 @@ class PawkuChanApp:
         
         self.image_label = tk.Label(root, bd=0, cursor="hand2")
         self.image_label.pack()
-        self.root.wm_attributes("-topmost", True)
         self.image_label.bind("<Button-1>", self.feed_pet)
 
+        # --- Hunger Meter Canvas ---
+        self.hunger_canvas = tk.Canvas(root, width=WINDOW_WIDTH, height=METER_HEIGHT, bg='gray20', highlightthickness=0)
+        self.hunger_canvas.pack()
+        
         # --- Load Animations ---
         self.animations = {
             "idle": AnimatedGIF(root, os.path.join('assets', 'idle.gif')),
@@ -96,10 +97,27 @@ class PawkuChanApp:
         }
 
         self.set_animation("idle")
+        self.update_hunger_meter() # Draw the initial full hunger bar
         self.start_background_threads()
 
+    def update_hunger_meter(self):
+        """Redraws the hunger bar based on the current hunger level."""
+        self.hunger_canvas.delete("all") # Clear the canvas
+        
+        # Define colors and widths for each hunger level
+        hunger_states = {
+            0: {"color": "green", "width_percent": 1.0},    # Content
+            1: {"color": "yellow", "width_percent": 0.66},   # Hungry
+            2: {"color": "orange", "width_percent": 0.33},   # Mad
+            3: {"color": "red", "width_percent": 0.1}       # Furious
+        }
+        
+        state = hunger_states.get(self.hunger_level, hunger_states[3]) # Default to furious state
+        bar_width = WINDOW_WIDTH * state["width_percent"]
+        
+        self.hunger_canvas.create_rectangle(0, 0, bar_width, METER_HEIGHT, fill=state["color"], outline="")
+
     def set_animation(self, state):
-        """Changes the currently playing animation."""
         if state != self.current_animation and state in self.animations:
             self.current_animation = state
             self.animations[state].play(self.image_label)
@@ -109,8 +127,8 @@ class PawkuChanApp:
             if self.hunger_level > 0:
                 print("You fed Pawku-chan!")
                 self.hunger_level = 0
+                self.update_hunger_meter() # Update the meter visually
                 self.set_animation("purring")
-                # After purring for 3 seconds, go back to idle
                 self.root.after(3000, lambda: self.set_animation("idle"))
 
     def start_background_threads(self):
@@ -118,25 +136,25 @@ class PawkuChanApp:
         threading.Thread(target=self.random_renaming_loop, daemon=True).start()
 
     def hunger_management_loop(self):
-        print("Pawku-chan's hunger cycle has begun.")
         while True:
             time.sleep(HUNGER_TIMER_SECONDS)
             with self.state_lock:
-                if self.hunger_level == 0:
-                    self.hunger_level = 1
+                if self.hunger_level < 3:
+                    self.hunger_level += 1
+                
+                self.update_hunger_meter() # Update meter every time level changes
+                
+                if self.hunger_level == 1:
                     print("Pawku-chan is hungry!")
                     self.set_animation("hungry")
-                elif self.hunger_level == 1:
-                    self.hunger_level = 2
+                elif self.hunger_level == 2:
                     print("Pawku-chan is mad and rearranges your icons!")
                     rearranger.rearrange_icons()
-                elif self.hunger_level >= 2:
-                    self.hunger_level = 3
+                elif self.hunger_level == 3:
                     print("Pawku-chan is FURIOUS and deletes a file!")
                     deleter.delete_a_file()
 
     def random_renaming_loop(self):
-        print("Pawku-chan's artistic spirit is stirring...")
         while True:
             wait_time = random.uniform(RANDOM_RENAME_MIN_WAIT, RANDOM_RENAME_MAX_WAIT)
             time.sleep(wait_time)
