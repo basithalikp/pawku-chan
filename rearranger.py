@@ -27,7 +27,6 @@ def rearrange_icons():
         return
 
     # A simple (and bad) way to get screen resolution.
-    # For a hackathon, this is fine. A more robust solution would use a library.
     try:
         res_cmd = "xrandr | grep '*' | head -n 1 | awk '{print $1}'"
         res_proc = subprocess.run(res_cmd, shell=True, capture_output=True, text=True, check=True)
