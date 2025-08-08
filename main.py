@@ -65,7 +65,7 @@ class PawkuChanApp:
             
         # Make the window background transparent (works on Windows/macOS, might need a compositor on Linux).
         # We use the background color of the root window as the transparency key.
-        self.root.wm_attributes("-transparentcolor", self.root['bg'])
+        self.root.wm_attributes("-topmost", True)
 
         # Start the main logic in a separate thread to avoid freezing the GUI.
         self.start_chaos_thread()
