@@ -42,7 +42,7 @@ python pawku_chan.py
 
 For Software:
 
-# Screenshots (Add at least 3)
+# Screenshots
 ![Screenshot 1](screenshots/2025-08-09-051601_hyprshot.png)
 *Pawku-Chan playfully renaming files on the desktop*
 
